@@ -49,8 +49,13 @@ onMounted(() => {
     scene = new GameScene(canvasRef.value, mapCanvas)
     scene.start()
 
-    scene.onTimeUpdate  = (hour) => { store.timeOfDay = hour }
-    scene.onNearPOI     = (poi)  => { nearPOI.value = poi }
+    scene.onTimeUpdate      = (hour)   => { store.timeOfDay = hour }
+    scene.onNearPOI         = (poi)    => { nearPOI.value = poi }
+    scene.onMissionStart    = (m)      => { store.setHudMission(m) }
+    scene.onMissionUpdate   = (t)      => { store.updateMissionTimer(t) }
+    scene.onMissionComplete = (reward) => { store.completeDelivery(reward) }
+    scene.onMissionFail     = ()       => { store.clearMission() }
+    scene.onInteractionHint = (hint)   => { store.setInteractionHint(hint) }
   })
 })
 

@@ -11,6 +11,9 @@ export class InputManager {
     sprint:   false,
   })
 
+  // One-shot interact latch — set on KeyE down, consumed once by consumeInteract()
+  private _interactLatch = false
+
   // Touch joystick state
   private touchStart: { x: number; y: number } | null = null
   private touchDelta: { x: number; y: number } = { x: 0, y: 0 }
@@ -37,10 +40,20 @@ export class InputManager {
     window.addEventListener('touchend',   this.onTouchEnd,   { passive: true })
   }
 
+  /**
+   * Returns true exactly once per E key press (edge-triggered, not level-triggered).
+   * Safe to call every frame — returns false on subsequent frames until pressed again.
+   */
+  consumeInteract(): boolean {
+    if (this._interactLatch) { this._interactLatch = false; return true }
+    return false
+  }
+
   private onKeyDown = (e: KeyboardEvent) => {
     const key = this.keyMap[e.code]
     if (key) (this.state as Record<string, boolean>)[key] = true
     if (e.code === 'Space') e.preventDefault()
+    if (e.code === 'KeyE')  this._interactLatch = true
   }
 
   private onKeyUp = (e: KeyboardEvent) => {

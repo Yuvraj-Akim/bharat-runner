@@ -11,6 +11,8 @@ import { MinimapSystem } from './MinimapSystem'
 import { NPCSystem } from './NPCSystem'
 import { StreetLights } from './StreetLights'
 import { VehicleSystem } from './VehicleSystem'
+import { MissionSystem } from './MissionSystem'
+import type { HudMission } from './MissionSystem'
 import { loadOrGenerateWorld, type WorldData, type WorldPOI } from './WorldData'
 import { MultiplayerClient, type ConnectionStatus } from './MultiplayerClient'
 import { RemotePlayerManager } from './RemotePlayerManager'
@@ -29,10 +31,11 @@ export class GameScene {
   private poiMgr:       POIManager
   private roads:        RoadNetwork
   private minimap:      MinimapSystem
-  private npcSystem:     NPCSystem
-  private streetLights:  StreetLights
-  private vehicleSystem: VehicleSystem
-  private clock:        THREE.Clock
+  private npcSystem:      NPCSystem
+  private streetLights:   StreetLights
+  private vehicleSystem:  VehicleSystem
+  private missionSystem:  MissionSystem
+  private clock:         THREE.Clock
   private animId:       number = 0
 
   // Multiplayer — null until connectMultiplayer() is called
@@ -42,11 +45,16 @@ export class GameScene {
   private mpUsername     = ''
 
   // ── External callbacks ────────────────────────────────────────────────────
-  onTimeUpdate?:     (hour: number) => void
-  onPlayerPosition?: (pos: THREE.Vector3) => void
-  onNearPOI?:        (poi: WorldPOI | null) => void
-  onOnlineCount?:    (count: number) => void
-  onMpStatus?:       (status: ConnectionStatus) => void
+  onTimeUpdate?:      (hour: number) => void
+  onPlayerPosition?:  (pos: THREE.Vector3) => void
+  onNearPOI?:         (poi: WorldPOI | null) => void
+  onOnlineCount?:     (count: number) => void
+  onMpStatus?:        (status: ConnectionStatus) => void
+  onMissionStart?:    (m: HudMission) => void
+  onMissionUpdate?:   (timeRemaining: number) => void
+  onMissionComplete?: (reward: number) => void
+  onMissionFail?:     () => void
+  onInteractionHint?: (hint: string | null) => void
 
   constructor(canvas: HTMLCanvasElement, minimapCanvas: HTMLCanvasElement) {
     // ── Renderer ────────────────────────────────────────────────────────────
@@ -86,6 +94,13 @@ export class GameScene {
 
     // ── Vehicles (bicycles, scooters, auto rickshaws) ────────────────────────
     this.vehicleSystem = new VehicleSystem(this.scene, this.worldData)
+
+    // ── Mission system (delivery gameplay) ─────────────────────────────────
+    this.missionSystem = new MissionSystem(this.worldData)
+    this.missionSystem.onMissionStart    = m => this.onMissionStart?.(m)
+    this.missionSystem.onMissionUpdate   = t => this.onMissionUpdate?.(t)
+    this.missionSystem.onMissionComplete = r => this.onMissionComplete?.(r)
+    this.missionSystem.onMissionFail     = () => this.onMissionFail?.()
 
     // ── Lighting + day/night (10-min full cycle) ────────────────────────────
     this.dayNight = new DayNightCycle(this.scene)
@@ -189,11 +204,16 @@ export class GameScene {
     // Minimap (cheap 2D canvas, redrawn each frame)
     this.minimap.draw(this.player.position, this.player.quaternion)
 
-    // POI proximity — throttled to ~10 checks/sec
-    if (Math.round(this.clock.getElapsedTime() * 10) % 10 === 0) {
-      const near = this.poiMgr.nearestPOI(this.player.position, 10)
-      this.onNearPOI?.(near)
-    }
+    // POI proximity check every frame (cheap dot-product scan of 20 POIs)
+    const nearPOI = this.poiMgr.nearestPOI(this.player.position, 10)
+
+    // E key: one-shot interact consumed here; mission system handles pickup/delivery
+    if (this.input.consumeInteract()) this.missionSystem.tryInteract(nearPOI)
+    this.missionSystem.update(dt)
+
+    // Push hints and POI info to Vue via callbacks
+    this.onInteractionHint?.(this.missionSystem.interactionHint(nearPOI))
+    this.onNearPOI?.(nearPOI)
 
     this.onTimeUpdate?.(this.dayNight.currentHour)
     this.onPlayerPosition?.(this.player.position)
