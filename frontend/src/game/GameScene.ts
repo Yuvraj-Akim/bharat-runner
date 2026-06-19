@@ -10,6 +10,7 @@ import { RoadNetwork } from './RoadNetwork'
 import { MinimapSystem } from './MinimapSystem'
 import { NPCSystem } from './NPCSystem'
 import { StreetLights } from './StreetLights'
+import { VehicleSystem } from './VehicleSystem'
 import { loadOrGenerateWorld, type WorldData, type WorldPOI } from './WorldData'
 import { MultiplayerClient, type ConnectionStatus } from './MultiplayerClient'
 import { RemotePlayerManager } from './RemotePlayerManager'
@@ -28,8 +29,9 @@ export class GameScene {
   private poiMgr:       POIManager
   private roads:        RoadNetwork
   private minimap:      MinimapSystem
-  private npcSystem:    NPCSystem
-  private streetLights: StreetLights
+  private npcSystem:     NPCSystem
+  private streetLights:  StreetLights
+  private vehicleSystem: VehicleSystem
   private clock:        THREE.Clock
   private animId:       number = 0
 
@@ -81,6 +83,9 @@ export class GameScene {
 
     // ── NPC pedestrians ─────────────────────────────────────────────────────
     this.npcSystem = new NPCSystem(this.scene, this.worldData.pois)
+
+    // ── Vehicles (bicycles, scooters, auto rickshaws) ────────────────────────
+    this.vehicleSystem = new VehicleSystem(this.scene, this.worldData)
 
     // ── Lighting + day/night (10-min full cycle) ────────────────────────────
     this.dayNight = new DayNightCycle(this.scene)
@@ -157,6 +162,9 @@ export class GameScene {
     // NPC pedestrians wander between POIs
     this.npcSystem.update(dt, this.worldData.pois)
 
+    // Vehicles follow road splines with day/night headlights
+    this.vehicleSystem.update(dt, this.worldData.pois, this.dayNight.daytimeRatio)
+
     // Remote players — interpolated every frame, never snapped
     this.remotePlayers?.update(dt)
 
@@ -197,6 +205,7 @@ export class GameScene {
     cancelAnimationFrame(this.animId)
     this.disconnectMultiplayer()
     this.npcSystem.dispose(this.scene)
+    this.vehicleSystem.dispose(this.scene)
     this.input.destroy()
     window.removeEventListener('resize', this.onResize)
   }
