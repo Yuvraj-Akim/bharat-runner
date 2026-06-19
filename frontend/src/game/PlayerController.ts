@@ -69,7 +69,7 @@ export class PlayerController {
     return group
   }
 
-  update(dt: number, input: InputState) {
+  update(dt: number, input: InputState, speedMult = 1.0) {
     const pos = this.mesh.position
 
     // Gravity direction = toward planet center
@@ -98,7 +98,7 @@ export class PlayerController {
     }
 
     // --- Horizontal movement ---
-    const speed = input.sprint ? SPRINT_SPEED : WALK_SPEED
+    const speed = (input.sprint ? SPRINT_SPEED : WALK_SPEED) * speedMult
     let moving = false
 
     if (input.left)  this.angularOffset += 2.0 * dt

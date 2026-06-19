@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(head *)"
+      "PowerShell(head *)",
+      "Bash(npx vite *)"
     ]
   }
 }

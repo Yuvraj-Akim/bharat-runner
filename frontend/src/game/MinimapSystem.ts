@@ -35,10 +35,18 @@ export class MinimapSystem {
   private roads: Array<{ ax: number; ay: number; bx: number; by: number }> = []
   private _poiWorldDirs: Array<THREE.Vector3> = []
   private worldData: WorldData | null = null
+  private _dstPOIId: number | null = null
+  private _dstColor = '#ffffff'
+  private _pulseT   = 0
 
   constructor(private canvas: HTMLCanvasElement) {
     canvas.width  = CANVAS_SIZE
     canvas.height = CANVAS_SIZE
+  }
+
+  setDestination(poiId: number | null, color = '#ffffff') {
+    this._dstPOIId = poiId
+    this._dstColor = color
   }
 
   loadWorld(world: WorldData) {
@@ -50,7 +58,8 @@ export class MinimapSystem {
   }
 
   /** Call once per frame with current player state */
-  draw(playerPos: THREE.Vector3, playerQuat: THREE.Quaternion) {
+  draw(playerPos: THREE.Vector3, playerQuat: THREE.Quaternion, dt = 0.016) {
+    this._pulseT += dt * 3
     const ctx = this.canvas.getContext('2d')
     if (!ctx || !this.worldData) return
 
@@ -188,6 +197,52 @@ export class MinimapSystem {
     ctx.stroke()
 
     ctx.restore()
+
+    // --- Mission destination route + marker ---
+    if (this._dstPOIId !== null && this.worldData && this._dstPOIId < this._poiWorldDirs.length) {
+      const dstWorld = this._poiWorldDirs[this._dstPOIId]
+      const dstProj  = project(dstWorld)
+
+      // Dashed route line from player to destination
+      ctx.save()
+      ctx.beginPath()
+      ctx.moveTo(CX, CY)
+      ctx.lineTo(dstProj.cx, dstProj.cy)
+      ctx.strokeStyle = this._dstColor
+      ctx.lineWidth   = 2
+      ctx.globalAlpha = 0.75
+      ctx.setLineDash([6, 5])
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.restore()
+
+      // Pulsing diamond marker at destination
+      const pulse  = 0.5 + 0.5 * Math.sin(this._pulseT)
+      const size   = 6 + pulse * 3
+      ctx.save()
+      ctx.translate(dstProj.cx, dstProj.cy)
+      ctx.rotate(Math.PI / 4)
+      ctx.beginPath()
+      ctx.rect(-size / 2, -size / 2, size, size)
+      ctx.fillStyle = this._dstColor
+      ctx.globalAlpha = 0.5 + 0.4 * pulse
+      ctx.fill()
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth   = 1.5
+      ctx.globalAlpha = 1
+      ctx.stroke()
+      ctx.restore()
+
+      // Distance text
+      const dist = playerPos.distanceTo(dstWorld)
+      const km   = (dist * 0.12).toFixed(1)
+      ctx.save()
+      ctx.font = 'bold 9px sans-serif'
+      ctx.fillStyle = this._dstColor
+      ctx.globalAlpha = 0.9
+      ctx.fillText(`${km}km`, dstProj.cx + 9, dstProj.cy - 4)
+      ctx.restore()
+    }
 
     // --- Border ring ---
     ctx.beginPath()

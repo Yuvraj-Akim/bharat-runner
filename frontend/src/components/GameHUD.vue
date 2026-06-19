@@ -13,6 +13,11 @@
         <span>{{ store.timeLabel }}</span>
       </div>
 
+      <div class="hud-pill" :class="{ mounted: store.isMounted }">
+        <span>{{ store.isMounted ? vehicleEmoji : '🚶' }}</span>
+        <span>{{ store.isMounted ? vehicleName : 'On foot' }}</span>
+      </div>
+
       <div class="hud-pill">
         <span>⭐</span>
         <span>{{ store.score }}</span>
@@ -85,8 +90,11 @@
     </Transition>
 
     <!-- ── Garage panel (left side, below controls) ────────── -->
-    <div class="garage-panel">
-      <div class="garage-title">🚗 Garage</div>
+    <div class="garage-panel" :class="{ 'garage-active': store.nearGarage }">
+      <div class="garage-title">
+        🏎️ Garage
+        <span v-if="store.nearGarage" class="garage-near-badge">Nearby</span>
+      </div>
       <div class="garage-items">
         <div
           v-for="veh in VEHICLE_SHOP"
@@ -95,22 +103,33 @@
           :class="{
             owned:   store.ownedVehicles.includes(veh.id),
             active:  store.currentVehicle === veh.id,
+            mounted: store.isMounted && store.currentVehicle === veh.id,
           }"
+          @click="selectVehicle(veh.id)"
         >
           <span class="veh-emoji">{{ veh.emoji }}</span>
-          <span class="veh-name">{{ veh.name }}</span>
-          <span v-if="store.ownedVehicles.includes(veh.id)" class="veh-status owned-badge">
-            {{ store.currentVehicle === veh.id ? '✓ Using' : 'Owned' }}
+          <div class="veh-info">
+            <span class="veh-name">{{ veh.name }}</span>
+            <span class="veh-speed">{{ speedLabel(veh.id) }}</span>
+          </div>
+          <span v-if="store.isMounted && store.currentVehicle === veh.id" class="veh-status riding">
+            Riding
+          </span>
+          <span v-else-if="store.ownedVehicles.includes(veh.id)" class="veh-status owned-badge">
+            {{ store.currentVehicle === veh.id ? '✓ Selected' : 'Owned' }}
           </span>
           <button
             v-else
             class="buy-btn"
             :disabled="store.coins < veh.price"
-            @click="buy(veh.id)"
+            @click.stop="buy(veh.id)"
           >
             ₹{{ veh.price }}
           </button>
         </div>
+      </div>
+      <div v-if="store.nearGarage" class="garage-tip">
+        Press <kbd>E</kbd> to {{ store.isMounted ? 'dismount' : 'mount' }}
       </div>
     </div>
 
@@ -122,6 +141,54 @@
       <div class="ctrl-row"><kbd>E</kbd><span>Interact</span></div>
       <button class="dismiss-btn" @click="showControls = false">Got it!</button>
     </div>
+
+    <!-- ── Delivery outcome overlay (success / fail) ──────── -->
+    <Transition name="outcome-pop">
+      <div
+        v-if="store.deliveryOutcome"
+        class="outcome-overlay"
+        :class="store.deliveryOutcome.type"
+      >
+        <!-- Success -->
+        <template v-if="store.deliveryOutcome.type === 'success'">
+          <div class="outcome-icon">🎉</div>
+          <div class="outcome-title">DELIVERED!</div>
+          <div class="outcome-reward">+₹{{ store.deliveryOutcome.reward }}</div>
+          <div class="outcome-meta">
+            <span>🪙 ₹{{ store.deliveryOutcome.totalCoins }} total</span>
+            <span>·</span>
+            <span>📦 {{ store.deliveriesDone }} {{ store.deliveriesDone === 1 ? 'delivery' : 'deliveries' }}</span>
+          </div>
+          <!-- Next vehicle progress (only if there's something left to unlock) -->
+          <template v-if="store.deliveryOutcome.nextVehicleName && store.deliveryOutcome.progressPct !== null">
+            <div class="outcome-progress-label">
+              <span>{{ store.deliveryOutcome.nextVehicleEmoji }} {{ store.deliveryOutcome.nextVehicleName }}</span>
+              <span v-if="store.deliveryOutcome.nextVehicleNeeded! > 0" class="outcome-needed">
+                ₹{{ store.deliveryOutcome.nextVehicleNeeded }} more
+              </span>
+              <span v-else class="outcome-unlocked">Unlocked!</span>
+            </div>
+            <div class="outcome-progress-bar">
+              <div
+                class="outcome-progress-fill"
+                :style="{ width: (store.deliveryOutcome.progressPct * 100) + '%' }"
+              />
+            </div>
+          </template>
+          <template v-else>
+            <div class="outcome-all-unlocked">🏆 All vehicles unlocked!</div>
+          </template>
+        </template>
+
+        <!-- Fail -->
+        <template v-else>
+          <div class="outcome-icon">⏰</div>
+          <div class="outcome-title">TIME'S UP!</div>
+          <div class="outcome-fail-msg">The delivery was cancelled.</div>
+          <div class="outcome-fail-sub">Find a POI and try again!</div>
+        </template>
+      </div>
+    </Transition>
 
     <!-- ── Bottom status bar ────────────────────────────────── -->
     <div class="hud-bottom">
@@ -139,12 +206,35 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useGameStore } from '../stores/gameStore'
-import { VEHICLE_SHOP } from '../stores/gameStore'
+import { useGameStore, VEHICLE_SHOP } from '../stores/gameStore'
 import { downloadWorldJSON, loadOrGenerateWorld } from '../game/WorldData'
 
 const store        = useGameStore()
 const showControls = ref(true)
+
+// ── Vehicle helpers ──────────────────────────────────────────────────────────
+
+const SPEED_LABELS: Record<string, string> = {
+  bicycle:      '8 / 16 u/s',
+  scooter:      '15 / 30 u/s',
+  ev_bike:      '19 / 38 u/s',
+  autorickshaw: '12 / 24 u/s',
+}
+
+const currentVehicleDef = computed(() =>
+  VEHICLE_SHOP.find(v => v.id === store.currentVehicle) ?? VEHICLE_SHOP[0]
+)
+
+const vehicleEmoji = computed(() => currentVehicleDef.value.emoji)
+const vehicleName  = computed(() => currentVehicleDef.value.name)
+
+function speedLabel(id: string) { return SPEED_LABELS[id] ?? '' }
+
+function selectVehicle(id: string) {
+  store.selectVehicle(id)
+}
+
+// ── Computed ─────────────────────────────────────────────────────────────────
 
 const timeIcon = computed(() => {
   const h = store.timeOfDay
@@ -161,13 +251,9 @@ const timerBarColor = computed(() => {
   return '#e63946'
 })
 
-function buy(id: string) {
-  store.buyVehicle(id)
-}
+function buy(id: string) { store.buyVehicle(id) }
 
-function exportWorld() {
-  downloadWorldJSON(loadOrGenerateWorld())
-}
+function exportWorld() { downloadWorldJSON(loadOrGenerateWorld()) }
 </script>
 
 <style scoped>
@@ -193,6 +279,10 @@ function exportWorld() {
   font-weight: 600;
 }
 .hud-pill.small { font-size: 13px; padding: 5px 12px; }
+.hud-pill.mounted {
+  border-color: #06d6a0;
+  background: rgba(6,214,160,0.18);
+}
 
 /* ── Top bar ──────────────────────────────────────────── */
 .hud-top {
@@ -337,7 +427,7 @@ function exportWorld() {
   position: absolute;
   bottom: 72px;
   left: 20px;
-  width: 230px;
+  width: 246px;
   background: rgba(0,0,0,0.62);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255,255,255,0.1);
@@ -347,6 +437,11 @@ function exportWorld() {
   flex-direction: column;
   gap: 8px;
   pointer-events: all;
+  transition: border-color 0.3s;
+}
+.garage-panel.garage-active {
+  border-color: #ff8c42;
+  box-shadow: 0 0 14px rgba(255,140,66,0.3);
 }
 .garage-title {
   font-size: 13px;
@@ -354,6 +449,25 @@ function exportWorld() {
   letter-spacing: 0.4px;
   opacity: 0.8;
   margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.garage-near-badge {
+  font-size: 10px;
+  background: #ff8c42;
+  color: #fff;
+  border-radius: 6px;
+  padding: 1px 7px;
+  letter-spacing: 0.3px;
+  opacity: 1;
+}
+.garage-tip {
+  font-size: 12px;
+  color: #ff8c42;
+  font-weight: 600;
+  text-align: center;
+  padding-top: 2px;
 }
 .garage-items { display: flex; flex-direction: column; gap: 6px; }
 
@@ -366,22 +480,28 @@ function exportWorld() {
   border-radius: 10px;
   padding: 6px 10px;
   font-size: 13px;
-  transition: border-color 0.2s;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
 }
+.garage-item:hover.owned { background: rgba(255,255,255,0.09); }
 .garage-item.active {
   border-color: #06d6a0;
   background: rgba(6,214,160,0.12);
 }
+.garage-item.mounted {
+  border-color: #ffd166;
+  background: rgba(255,209,102,0.15);
+}
 .garage-item.owned { border-color: rgba(255,255,255,0.18); }
 
-.veh-emoji { font-size: 18px; }
-.veh-name  { flex: 1; font-weight: 600; }
+.veh-emoji { font-size: 18px; flex-shrink: 0; }
+.veh-info  { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.veh-name  { font-weight: 600; font-size: 13px; }
+.veh-speed { font-size: 10px; opacity: 0.55; }
 
-.veh-status.owned-badge {
-  font-size: 11px;
-  font-weight: 700;
-  opacity: 0.7;
-}
+.veh-status { font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.veh-status.owned-badge { opacity: 0.7; }
+.veh-status.riding      { color: #ffd166; opacity: 1; }
 .garage-item.active .veh-status { color: #06d6a0; opacity: 1; }
 
 .buy-btn {
@@ -459,6 +579,110 @@ kbd {
   transition: background 0.2s;
 }
 .export-btn:hover { background: rgba(232,93,4,0.5); color: #fff; }
+
+/* ── Delivery outcome overlay ─────────────────────────── */
+.outcome-overlay {
+  position: absolute;
+  bottom: 140px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
+  background: rgba(0,0,0,0.82);
+  backdrop-filter: blur(18px);
+  border-radius: 20px;
+  padding: 22px 24px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  text-align: center;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+.outcome-overlay.success {
+  border: 1.5px solid #06d6a0;
+  box-shadow: 0 0 32px rgba(6,214,160,0.25), 0 8px 40px rgba(0,0,0,0.6);
+}
+.outcome-overlay.fail {
+  border: 1.5px solid #e63946;
+  box-shadow: 0 0 32px rgba(230,57,70,0.25), 0 8px 40px rgba(0,0,0,0.6);
+}
+
+.outcome-icon  { font-size: 36px; line-height: 1; margin-bottom: 2px; }
+.outcome-title {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.success .outcome-title { color: #06d6a0; }
+.fail    .outcome-title { color: #e63946; }
+
+.outcome-reward {
+  font-size: 36px;
+  font-weight: 900;
+  color: #ffd166;
+  letter-spacing: 1px;
+  line-height: 1.1;
+}
+.outcome-meta {
+  font-size: 13px;
+  color: rgba(255,255,255,0.6);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.outcome-progress-label {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 10px;
+  color: rgba(255,255,255,0.85);
+}
+.outcome-needed   { color: rgba(255,255,255,0.5); font-weight: 600; }
+.outcome-unlocked { color: #ffd166; }
+.outcome-all-unlocked {
+  font-size: 13px;
+  color: #ffd166;
+  font-weight: 700;
+  margin-top: 8px;
+}
+
+.outcome-progress-bar {
+  width: 100%;
+  height: 7px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.outcome-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #06d6a0, #ffd166);
+  border-radius: 4px;
+  transition: width 0.6s ease;
+}
+
+.outcome-fail-msg {
+  font-size: 15px;
+  color: rgba(255,255,255,0.75);
+  margin-top: 4px;
+}
+.outcome-fail-sub {
+  font-size: 13px;
+  color: rgba(255,255,255,0.45);
+}
+
+/* outcome pop animation */
+.outcome-pop-enter-active { transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.outcome-pop-leave-active  { transition: all 0.25s ease-in; }
+.outcome-pop-enter-from    { opacity: 0; transform: translateX(-50%) translateY(30px) scale(0.88); }
+.outcome-pop-leave-to      { opacity: 0; transform: translateX(-50%) translateY(20px) scale(0.95); }
 
 /* ── Vue transitions ──────────────────────────────────── */
 .slide-right-enter-active,

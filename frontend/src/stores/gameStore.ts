@@ -20,6 +20,17 @@ export const VEHICLE_SHOP: VehicleDef[] = [
   { id: 'autorickshaw', name: 'Auto Rickshaw',  emoji: '🛺', price: 3000, desc: 'High-load carrier' },
 ]
 
+// ── Delivery outcome (shown after complete / fail) ─────────────────────────────
+export interface DeliveryOutcome {
+  type:              'success' | 'fail'
+  reward:            number
+  totalCoins:        number
+  nextVehicleName:   string | null
+  nextVehicleEmoji:  string | null
+  nextVehicleNeeded: number | null   // coins still needed; 0 = just unlocked
+  progressPct:       number | null   // 0–1 toward next vehicle price
+}
+
 // ── Persistence key + shape ────────────────────────────────────────────────────
 const SAVE_KEY = 'bharat_runner_save_v2'
 
@@ -57,6 +68,11 @@ export const useGameStore = defineStore('game', () => {
   // ── Runtime-only UI state (not persisted) ──────────────────────────────────
   const hudMission       = ref<HudMission | null>(null)
   const interactionHint  = ref<string | null>(null)
+  const isMounted        = ref(false)
+  const nearGarage       = ref(false)
+  const deliveryOutcome  = ref<DeliveryOutcome | null>(null)
+
+  let _outcomeClearTimer: ReturnType<typeof setTimeout> | null = null
 
   // ── Computed ────────────────────────────────────────────────────────────────
 
@@ -98,6 +114,27 @@ export const useGameStore = defineStore('game', () => {
     score.value  += reward * 10
     hudMission.value = null
     persist()
+    _triggerOutcome('success', reward)
+  }
+
+  function failDelivery() {
+    hudMission.value = null
+    _triggerOutcome('fail', 0)
+  }
+
+  function _triggerOutcome(type: 'success' | 'fail', reward: number) {
+    if (_outcomeClearTimer) { clearTimeout(_outcomeClearTimer); _outcomeClearTimer = null }
+    const nextVeh = VEHICLE_SHOP.find(v => !ownedVehicles.value.includes(v.id)) ?? null
+    deliveryOutcome.value = {
+      type,
+      reward,
+      totalCoins:        coins.value,
+      nextVehicleName:   nextVeh?.name  ?? null,
+      nextVehicleEmoji:  nextVeh?.emoji ?? null,
+      nextVehicleNeeded: nextVeh ? Math.max(0, nextVeh.price - coins.value) : null,
+      progressPct:       nextVeh ? Math.min(1, coins.value / nextVeh.price) : null,
+    }
+    _outcomeClearTimer = setTimeout(() => { deliveryOutcome.value = null; _outcomeClearTimer = null }, 2800)
   }
 
   // ── Mission state ─────────────────────────────────────────────────────────
@@ -118,6 +155,14 @@ export const useGameStore = defineStore('game', () => {
     interactionHint.value = hint
   }
 
+  function setMounted(mounted: boolean) {
+    isMounted.value = mounted
+  }
+
+  function setNearGarage(near: boolean) {
+    nearGarage.value = near
+  }
+
   // ── Vehicle progression ────────────────────────────────────────────────────
 
   function buyVehicle(id: string): boolean {
@@ -127,6 +172,13 @@ export const useGameStore = defineStore('game', () => {
       coins.value -= def.price
       ownedVehicles.value = [...ownedVehicles.value, id]
     }
+    currentVehicle.value = id
+    persist()
+    return true
+  }
+
+  function selectVehicle(id: string): boolean {
+    if (!ownedVehicles.value.includes(id)) return false
     currentVehicle.value = id
     persist()
     return true
@@ -159,13 +211,14 @@ export const useGameStore = defineStore('game', () => {
     gameState, playerName, timeOfDay,
     coins, score, deliveriesDone,
     ownedVehicles, currentVehicle,
-    hudMission, interactionHint,
+    hudMission, interactionHint, isMounted, nearGarage, deliveryOutcome,
     // Computed
     timeLabel, missionTimeFmt, missionTimePct,
     // Actions
     setName, startGame, pauseGame, resumeGame,
-    addCoins, completeDelivery,
+    addCoins, completeDelivery, failDelivery,
     setHudMission, updateMissionTimer, clearMission, setInteractionHint,
-    buyVehicle, resetProgress,
+    setMounted, setNearGarage,
+    buyVehicle, selectVehicle, resetProgress,
   }
 })

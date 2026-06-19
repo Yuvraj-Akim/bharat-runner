@@ -37,6 +37,9 @@ watch(() => store.gameState, (state) => {
   }
 })
 
+// Propagate vehicle selection to GameScene so speed multiplier updates live
+watch(() => store.currentVehicle, (id) => { scene?.setVehicle(id) })
+
 onMounted(() => {
   // Give Vue one tick to render MinimapCanvas and expose its canvas ref.
   // NOTE: Vue's component proxy unwraps Refs exposed via defineExpose, so
@@ -54,8 +57,13 @@ onMounted(() => {
     scene.onMissionStart    = (m)      => { store.setHudMission(m) }
     scene.onMissionUpdate   = (t)      => { store.updateMissionTimer(t) }
     scene.onMissionComplete = (reward) => { store.completeDelivery(reward) }
-    scene.onMissionFail     = ()       => { store.clearMission() }
+    scene.onMissionFail     = ()       => { store.failDelivery() }
     scene.onInteractionHint = (hint)   => { store.setInteractionHint(hint) }
+    scene.onVehicleMounted  = (m)      => { store.setMounted(m) }
+    scene.onNearGarage      = (n)      => { store.setNearGarage(n) }
+
+    // Sync initial vehicle selection
+    scene.setVehicle(store.currentVehicle)
   })
 })
 
