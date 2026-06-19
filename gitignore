@@ -16,3 +16,10 @@ target/
 # Env
 .env
 .env.local
+
+node_modules/
+dist/
+target/
+.idea/
+.vscode/
+.env
